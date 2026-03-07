@@ -1,15 +1,40 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, XAxis, YAxis, CartesianGrid, Area, AreaChart,
-  BarChart, Bar, ScatterChart, Scatter, ZAxis,
+  BarChart, Bar, ScatterChart, Scatter, ZAxis, ReferenceLine,
 } from 'recharts';
+import { Loader2 } from 'lucide-react';
 import { useData } from '@/contexts/DataContext';
 import { usePortfolio } from '@/hooks/usePortfolio';
 import { formatARS, formatUSD } from '@/lib/formatters';
 import { useCurrency } from '@/contexts/CurrencyContext';
+import { toYahooTicker } from '@/lib/yahooTickers';
+import type { Transaction } from '@/types';
+
+function getQuantityAtDate(txs: Transaction[], date: string): Record<string, number> {
+  const qty: Record<string, number> = {};
+  for (const tx of txs) {
+    if (tx.date > date) continue;
+    qty[tx.ticker] = (qty[tx.ticker] ?? 0) + (tx.type === 'BUY' ? tx.quantity : -tx.quantity);
+  }
+  return qty;
+}
+
+function getInvestedAtDate(txs: Transaction[], date: string, isUSD: boolean): number {
+  let total = 0;
+  for (const tx of txs) {
+    if (tx.date > date || tx.type !== 'BUY') continue;
+    if (isUSD) {
+      total += tx.currency === 'USD' ? tx.totalAmount : (tx.exchangeRate ? tx.totalAmount / tx.exchangeRate : 0);
+    } else {
+      total += tx.currency === 'ARS' ? tx.totalAmount : (tx.exchangeRate ? tx.totalAmount * tx.exchangeRate : 0);
+    }
+  }
+  return total;
+}
 
 const COLORS = [
   '#2979ff', '#00c853', '#ff6d00', '#aa00ff', '#00b8d4',
@@ -92,7 +117,7 @@ function PLBarChart({ data, title, subtitle, currency }: PLBarChartProps) {
 }
 
 export function ChartsPage() {
-  const { transactions, currentPrices } = useData();
+  const { transactions, currentPrices, cclRate } = useData();
   const { currency } = useCurrency();
   const isUSD = currency === 'USD';
   const fmt = (v: number) => isUSD ? formatUSD(v) : formatARS(v);
@@ -100,7 +125,7 @@ export function ChartsPage() {
     ? (v: number) => `US$${Math.abs(v).toFixed(0)}`
     : (v: number) => `$${(Math.abs(v) / 1000).toFixed(0)}k`;
 
-  const { holdings } = usePortfolio(transactions, currentPrices);
+  const { holdings } = usePortfolio(transactions, currentPrices, cclRate ?? undefined);
 
   const compositionData = useMemo(() =>
     holdings
@@ -115,16 +140,6 @@ export function ChartsPage() {
     [holdings, isUSD],
   );
 
-  const typeData = useMemo(() => {
-    const cedears = holdings.filter(h => h.assetType === 'CEDEAR')
-      .reduce((s, h) => s + (isUSD ? h.totalInvestedUSD : h.totalInvestedARS), 0);
-    const local = holdings.filter(h => h.assetType === 'ACCION_LOCAL')
-      .reduce((s, h) => s + (isUSD ? h.totalInvestedUSD : h.totalInvestedARS), 0);
-    return [
-      { name: 'CEDEARs', value: isUSD ? cedears : Math.round(cedears) },
-      { name: 'Acciones Locales', value: isUSD ? local : Math.round(local) },
-    ].filter(d => d.value > 0);
-  }, [holdings, isUSD]);
 
   const evolutionData = useMemo(() => {
     const buys = transactions.filter(t => t.type === 'BUY').sort((a, b) => a.date.localeCompare(b.date));
@@ -166,30 +181,80 @@ export function ChartsPage() {
     [holdings, isUSD],
   );
 
-  const currencyData = useMemo(() => {
-    const arsTotal = transactions.filter(t => t.type === 'BUY' && t.currency === 'ARS').reduce((s, t) => s + t.totalAmount, 0);
-    const usdTotal = transactions.filter(t => t.type === 'BUY' && t.currency === 'USD').reduce((s, t) => s + t.totalAmount, 0);
-    return [
-      { name: 'ARS (Pesos)', value: Math.round(arsTotal) },
-      { name: 'USD (Dólares)', value: Math.round(usdTotal) },
-    ].filter(d => d.value > 0);
-  }, [transactions]);
 
   const plData = useMemo(() =>
     holdings
-      .filter(h => h.unrealizedGainLoss !== undefined && h.currentPriceCurrency === currency)
+      .filter(h => isUSD
+        ? h.unrealizedGainLossUSD !== undefined && h.totalInvestedUSD > 0
+        : h.unrealizedGainLossARS !== undefined && h.totalInvestedARS > 0,
+      )
       .sort((a, b) =>
-        isUSD
-          ? b.totalInvestedUSD - a.totalInvestedUSD
-          : b.totalInvestedARS - a.totalInvestedARS,
+        isUSD ? b.totalInvestedUSD - a.totalInvestedUSD : b.totalInvestedARS - a.totalInvestedARS,
       )
       .map(h => ({
         ticker: h.ticker,
         invertido: isUSD ? h.totalInvestedUSD : Math.round(h.totalInvestedARS),
-        ganancia: isUSD ? h.unrealizedGainLoss! : Math.round(h.unrealizedGainLoss!),
+        ganancia: isUSD ? h.unrealizedGainLossUSD! : Math.round(h.unrealizedGainLossARS!),
       })),
-    [holdings, currency, isUSD],
+    [holdings, isUSD],
   );
+
+  const bestPerformersData = useMemo(() =>
+    holdings
+      .filter(h => isUSD ? h.unrealizedGainLossPctUSD !== undefined : h.unrealizedGainLossPctARS !== undefined)
+      .sort((a, b) => {
+        const pa = isUSD ? (a.unrealizedGainLossPctUSD ?? 0) : (a.unrealizedGainLossPctARS ?? 0);
+        const pb = isUSD ? (b.unrealizedGainLossPctUSD ?? 0) : (b.unrealizedGainLossPctARS ?? 0);
+        return pb - pa;
+      })
+      .map(h => ({
+        ticker: h.ticker,
+        rendimiento: isUSD ? (h.unrealizedGainLossPctUSD ?? 0) : (h.unrealizedGainLossPctARS ?? 0),
+      })),
+    [holdings, isUSD],
+  );
+
+  // Price history chart state
+  const [priceHistory, setPriceHistory] = useState<Record<string, { date: string; price: number }[]>>({});
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const holdingTickers = useMemo(() => holdings.map(h => h.ticker), [holdings]);
+
+  useEffect(() => {
+    if (holdingTickers.length === 0) return;
+    setIsLoadingHistory(true);
+    const symbols = holdingTickers.map(t => toYahooTicker(t));
+    fetch('/api/prices/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols, period: '1y' }),
+    })
+      .then(r => r.json())
+      .then((data: { history?: Record<string, { date: string; price: number }[]> }) => {
+        if (data.history) setPriceHistory(data.history);
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingHistory(false));
+  }, [holdingTickers.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Build merged date series for the price history LineChart
+  const priceHistoryChartData = useMemo(() => {
+    const entries = Object.entries(priceHistory);
+    if (entries.length === 0) return [];
+
+    // Collect all unique dates, sorted
+    const allDates = [...new Set(entries.flatMap(([, series]) => series.map(d => d.date)))].sort();
+
+    return allDates.map(date => {
+      const row: Record<string, string | number> = { date: date.slice(0, 7) }; // YYYY-MM
+      for (const [symbol, series] of entries) {
+        const ticker = symbol.replace('.BA', '');
+        const point = series.find(d => d.date === date);
+        if (point) row[ticker] = point.price;
+      }
+      return row;
+    });
+  }, [priceHistory]);
 
   const timelineData = useMemo(() =>
     transactions
@@ -205,6 +270,39 @@ export function ChartsPage() {
       }),
     [transactions]
   );
+
+  const historicalPLData = useMemo(() => {
+    if (Object.keys(priceHistory).length === 0) return [];
+
+    const allDates = [...new Set(
+      Object.values(priceHistory).flatMap(s => s.map(d => d.date)),
+    )].sort();
+
+    return allDates.map(date => {
+      const quantities = getQuantityAtDate(transactions, date);
+      const invested = getInvestedAtDate(transactions, date, isUSD);
+
+      let totalValue = 0;
+      let hasSomePrice = false;
+
+      for (const [ticker, qty] of Object.entries(quantities)) {
+        if (qty <= 0) continue;
+        const sym = toYahooTicker(ticker);
+        const series = priceHistory[sym];
+        if (!series) continue;
+        const pricePoint = [...series].reverse().find(d => d.date <= date);
+        if (!pricePoint) continue;
+        hasSomePrice = true;
+        totalValue += isUSD && cclRate
+          ? (pricePoint.price / cclRate) * qty
+          : pricePoint.price * qty;
+      }
+
+      if (!hasSomePrice) return null;
+      const ganancia = totalValue - invested;
+      return { date: date.slice(0, 7), ganancia: isUSD ? ganancia : Math.round(ganancia) };
+    }).filter((d): d is { date: string; ganancia: number } => d !== null);
+  }, [priceHistory, transactions, isUSD, cclRate]);
 
   const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name }: {
     cx?: number; cy?: number; midAngle?: number; innerRadius?: number; outerRadius?: number; percent?: number; name?: string;
@@ -257,40 +355,91 @@ export function ChartsPage() {
           </ChartCard>
         )}
 
-        {typeData.length > 0 && (
-          <ChartCard title="CEDEARs vs Acciones Locales">
+        {bestPerformersData.length > 0 && (
+          <ChartCard title={`Rendimiento por Activo (${currency})`}>
             <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie data={typeData} cx="50%" cy="50%" outerRadius={110} innerRadius={50} dataKey="value">
-                  <Cell fill="#2979ff" />
-                  <Cell fill="#ff6d00" />
-                </Pie>
-                <Tooltip contentStyle={tooltipStyle} formatter={(val) => [fmt(Number(val ?? 0)), 'Invertido']} />
-                <Legend formatter={(value) => <span style={{ color: '#94a3b8', fontSize: '11px' }}>{value}</span>} />
-              </PieChart>
+              <BarChart data={bestPerformersData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#2d3348" />
+                <XAxis
+                  type="number"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(v: number) => `${v.toFixed(0)}%`}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="ticker"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 11, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}
+                  width={55}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(val: number) => [`${val >= 0 ? '+' : ''}${val.toFixed(2)}%`, 'Rendimiento']}
+                />
+                <ReferenceLine x={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                <Bar dataKey="rendimiento" radius={[0, 4, 4, 0]}>
+                  {bestPerformersData.map((entry, i) => (
+                    <Cell key={i} fill={entry.rendimiento >= 0 ? '#00c853' : '#ff1744'} />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </ChartCard>
         )}
 
-        {evolutionData.length > 0 && (
-          <ChartCard title={`Evolución de Inversión Acumulada (${currency})`}>
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={evolutionData}>
-                <defs>
-                  <linearGradient id="colorAcum" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2979ff" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#2979ff" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
+        <ChartCard title="Evolución de Precios por Activo (último año, ARS)">
+          {isLoadingHistory ? (
+            <div className="flex items-center justify-center h-48 gap-2 text-slate-500 text-sm">
+              <Loader2 size={16} className="animate-spin" /> Cargando historial de precios...
+            </div>
+          ) : priceHistoryChartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={priceHistoryChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2d3348" />
-                <XAxis dataKey="month" stroke="#94a3b8" tick={{ fontSize: 10 }} />
-                <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} tickFormatter={tickFmt} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(val) => [fmt(Number(val ?? 0)), 'Acumulado']} />
-                <Area type="monotone" dataKey="acumulado" stroke="#2979ff" fill="url(#colorAcum)" strokeWidth={2} />
-              </AreaChart>
+                <XAxis
+                  dataKey="date"
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(v: string) => {
+                    const [, m] = v.split('-');
+                    return m ? v.slice(2) : v; // YY-MM
+                  }}
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  tick={{ fontSize: 10 }}
+                  tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`}
+                />
+                <Tooltip
+                  contentStyle={tooltipStyle}
+                  formatter={(val: number, name: string) => [formatARS(Number(val ?? 0)), name]}
+                />
+                <Legend formatter={(v) => (
+                  <span style={{ color: '#94a3b8', fontSize: '11px', fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{v}</span>
+                )} />
+                {Object.keys(priceHistory).map((symbol, i) => {
+                  const ticker = symbol.replace('.BA', '');
+                  return (
+                    <Line
+                      key={ticker}
+                      type="monotone"
+                      dataKey={ticker}
+                      stroke={COLORS[i % COLORS.length]}
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls
+                    />
+                  );
+                })}
+              </LineChart>
             </ResponsiveContainer>
-          </ChartCard>
-        )}
+          ) : (
+            <div className="flex items-center justify-center h-48 text-slate-600 text-sm">
+              Sin datos de historial disponibles
+            </div>
+          )}
+        </ChartCard>
 
         {monthlyData.length > 0 && (
           <ChartCard title={`Inversión por Mes (${currency})`}>
@@ -322,30 +471,35 @@ export function ChartsPage() {
           </ChartCard>
         )}
 
-        {currencyData.length > 0 && (
-          <ChartCard title="Distribución por Moneda">
+        {historicalPLData.length > 1 && (
+          <ChartCard title={`Evolución de Ganancia No Realizada (${currency})`}>
             <ResponsiveContainer width="100%" height={240}>
-              <PieChart>
-                <Pie
-                  data={currencyData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={90}
-                  dataKey="value"
-                  label={({ name, percent }: { name?: string; percent?: number }) => `${name} ${((percent ?? 0) * 100).toFixed(1)}%`}
-                  labelLine={true}
-                >
-                  <Cell fill="#00c853" />
-                  <Cell fill="#2979ff" />
-                </Pie>
+              <AreaChart data={historicalPLData}>
+                <defs>
+                  <linearGradient id="plGradientPos" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#00c853" stopOpacity={0.3} />
+                    <stop offset="95%" stopColor="#00c853" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2d3348" />
+                <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} tickFormatter={tickFmt} />
                 <Tooltip
                   contentStyle={tooltipStyle}
-                  formatter={(val, name) => {
-                    const isUSDCurrency = name === 'USD (Dólares)';
-                    return [isUSDCurrency ? formatUSD(Number(val ?? 0)) : formatARS(Number(val ?? 0)), String(name ?? '')];
+                  formatter={(val) => {
+                    const v = Number(val ?? 0);
+                    return [`${v >= 0 ? '+' : ''}${fmt(v)}`, 'Ganancia/Pérdida'];
                   }}
                 />
-              </PieChart>
+                <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="4 4" />
+                <Area
+                  type="monotone"
+                  dataKey="ganancia"
+                  stroke="#00c853"
+                  fill="url(#plGradientPos)"
+                  strokeWidth={2}
+                />
+              </AreaChart>
             </ResponsiveContainer>
           </ChartCard>
         )}

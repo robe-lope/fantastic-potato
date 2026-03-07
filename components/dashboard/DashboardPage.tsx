@@ -10,15 +10,18 @@ import { fetchCurrentPrices, applyFetchedPrices } from '@/lib/priceFetcher';
 import { useToast, ToastContainer } from '@/components/ui/Toast';
 
 export function DashboardPage() {
-  const { transactions, currentPrices, updatePrice, updatePricesBulk } = useData();
-  const { holdings, summary } = usePortfolio(transactions, currentPrices);
+  const { transactions, currentPrices, updatePrice, updatePricesBulk, cclRate, refreshCCLRate } = useData();
+  const { holdings, summary } = usePortfolio(transactions, currentPrices, cclRate ?? undefined);
   const { toasts, showToast, removeToast } = useToast();
   const [isFetching, setIsFetching] = useState(false);
 
   const handleFetchPrices = async () => {
     setIsFetching(true);
     try {
-      const response = await fetchCurrentPrices(holdings);
+      const [response] = await Promise.all([
+        fetchCurrentPrices(holdings),
+        refreshCCLRate(),
+      ]);
       const updated = applyFetchedPrices(currentPrices, response.prices, response.fetchedAt);
       await updatePricesBulk(updated);
       const succeeded = response.prices.filter(p => p.price !== null).length;

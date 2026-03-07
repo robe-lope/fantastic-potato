@@ -1,15 +1,9 @@
 /**
  * Maps a portfolio ticker to its Yahoo Finance symbol.
- * - ACCION_LOCAL → always .BA (e.g., GGAL → GGAL.BA)
- * - CEDEAR with ARS price → .BA (e.g., AAPL → AAPL.BA)
- * - CEDEAR with USD price → no suffix (e.g., GOOGL → GOOGL)
+ * All Argentine assets use the .BA suffix (Buenos Aires exchange).
+ * CEDEARs are quoted in ARS on Yahoo Finance as TICKER.BA.
  */
-export function toYahooTicker(
-  ticker: string,
-  assetType: 'CEDEAR' | 'ACCION_LOCAL',
-  currency: 'ARS' | 'USD',
-): string {
-  if (assetType === 'ACCION_LOCAL') return `${ticker}.BA`;
-  if (currency === 'ARS') return `${ticker}.BA`;
-  return ticker;
+export function toYahooTicker(ticker: string): string {
+  // Todos los activos argentinos (CEDEARs y acciones locales) usan sufijo .BA en Yahoo Finance
+  return `${ticker}.BA`;
 }

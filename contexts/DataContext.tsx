@@ -60,6 +60,8 @@ interface DataContextValue {
   currentPrices: Record<string, CurrentPrice>;
   isLoading: boolean;
   error: string | null;
+  cclRate: number | null;
+  refreshCCLRate: () => Promise<void>;
   addTransaction: (tx: Omit<Transaction, 'id' | 'pricePerUnit'>) => Promise<void>;
   updateTransaction: (tx: Transaction) => Promise<void>;
   deleteTransaction: (id: string) => Promise<void>;
@@ -75,6 +77,8 @@ const DataContext = createContext<DataContextValue>({
   currentPrices: {},
   isLoading: true,
   error: null,
+  cclRate: null,
+  refreshCCLRate: async () => {},
   addTransaction: async () => {},
   updateTransaction: async () => {},
   deleteTransaction: async () => {},
@@ -90,8 +94,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [currentPrices, setCurrentPrices] = useState<Record<string, CurrentPrice>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cclRate, setCclRate] = useState<number | null>(null);
+
+  const refreshCCLRate = useCallback(async () => {
+    try {
+      const res = await fetch('/api/dolar');
+      if (res.ok) {
+        const data = await res.json() as { rate?: number };
+        if (data.rate) setCclRate(data.rate);
+      }
+    } catch {
+      // ignorar errores de red — el CCL es opcional
+    }
+  }, []);
 
   // Load data from Supabase on mount
+  useEffect(() => {
+    refreshCCLRate();
+  }, [refreshCCLRate]);
+
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
@@ -101,8 +122,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
           supabase.from('current_prices').select('*'),
         ]);
 
-        if (txErr) throw txErr;
-        if (priceErr) throw priceErr;
+        if (txErr) throw new Error(txErr.message);
+        if (priceErr) throw new Error(priceErr.message);
 
         setTransactions((txData ?? []).map(r => mapTransaction(r as Record<string, unknown>)));
 
@@ -138,7 +159,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     setTransactions(prev => [mapTransaction(data as Record<string, unknown>), ...prev]);
   }, []);
 
@@ -160,13 +181,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     setTransactions(prev => prev.map(t => t.id === tx.id ? mapTransaction(data as Record<string, unknown>) : t));
   }, []);
 
   const deleteTransaction = useCallback(async (id: string) => {
     const { error } = await supabase.from('transactions').delete().eq('id', id);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     setTransactions(prev => prev.filter(t => t.id !== id));
   }, []);
 
@@ -176,7 +197,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       .from('current_prices')
       .upsert({ ticker, price, currency, updated_at: new Date().toISOString() });
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     setCurrentPrices(prev => ({ ...prev, [ticker]: { ticker, price, currency, updatedAt: today } }));
   }, []);
 
@@ -189,14 +210,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
 
     const { error } = await supabase.from('current_prices').upsert(rows);
-    if (error) throw error;
+    if (error) throw new Error(error.message);
     setCurrentPrices(prices);
   }, []);
 
   const importTransactions = useCallback(async (txs: Transaction[], replace = false) => {
     if (replace) {
       const { error: delErr } = await supabase.from('transactions').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      if (delErr) throw delErr;
+      if (delErr) throw new Error(delErr.message);
     }
 
     const rows = txs.map(tx => ({
@@ -213,7 +234,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }));
 
     const { data, error } = await supabase.from('transactions').upsert(rows).select();
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
     const mapped = (data ?? []).map(r => mapTransaction(r as Record<string, unknown>));
     setTransactions(replace ? mapped : prev => [...mapped, ...prev]);
@@ -277,6 +298,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       currentPrices,
       isLoading,
       error,
+      cclRate,
+      refreshCCLRate,
       addTransaction,
       updateTransaction,
       deleteTransaction,

@@ -3,6 +3,7 @@ import type { Transaction, Holding, PortfolioSummary, CurrentPrice } from '@/typ
 export function calculateHoldings(
   transactions: Transaction[],
   currentPrices: Record<string, CurrentPrice> = {},
+  cclRate?: number,
 ): Holding[] {
   const holdingsMap = new Map<string, {
     ticker: string;
@@ -71,15 +72,45 @@ export function calculateHoldings(
       let currentTotalValue: number | undefined;
       let unrealizedGainLoss: number | undefined;
       let unrealizedGainLossPct: number | undefined;
+      let currentTotalValueARS: number | undefined;
+      let currentTotalValueUSD: number | undefined;
+      let unrealizedGainLossARS: number | undefined;
+      let unrealizedGainLossUSD: number | undefined;
+      let unrealizedGainLossPctARS: number | undefined;
+      let unrealizedGainLossPctUSD: number | undefined;
 
       if (cp) {
         currentPricePerUnit = cp.price;
         currentPriceCurrency = cp.currency;
         currentTotalValue = cp.price * h.totalQuantity;
+
+        // P&L en moneda nativa del precio
         const invested = cp.currency === 'ARS' ? h.totalInvestedARS : h.totalInvestedUSD;
         if (invested > 0) {
           unrealizedGainLoss = currentTotalValue - invested;
           unrealizedGainLossPct = (unrealizedGainLoss / invested) * 100;
+        }
+
+        // Valores en ARS (nativo o convertido desde USD via CCL)
+        currentTotalValueARS = cp.currency === 'ARS'
+          ? currentTotalValue
+          : cclRate ? currentTotalValue * cclRate : undefined;
+
+        // Valores en USD (nativo o convertido desde ARS via CCL)
+        currentTotalValueUSD = cp.currency === 'USD'
+          ? currentTotalValue
+          : cclRate ? currentTotalValue / cclRate : undefined;
+
+        // P&L en ARS
+        if (currentTotalValueARS !== undefined && h.totalInvestedARS > 0) {
+          unrealizedGainLossARS = currentTotalValueARS - h.totalInvestedARS;
+          unrealizedGainLossPctARS = (unrealizedGainLossARS / h.totalInvestedARS) * 100;
+        }
+
+        // P&L en USD
+        if (currentTotalValueUSD !== undefined && h.totalInvestedUSD > 0) {
+          unrealizedGainLossUSD = currentTotalValueUSD - h.totalInvestedUSD;
+          unrealizedGainLossPctUSD = (unrealizedGainLossUSD / h.totalInvestedUSD) * 100;
         }
       }
 
@@ -96,6 +127,12 @@ export function calculateHoldings(
         currentTotalValue,
         unrealizedGainLoss,
         unrealizedGainLossPct,
+        currentTotalValueARS,
+        currentTotalValueUSD,
+        unrealizedGainLossARS,
+        unrealizedGainLossUSD,
+        unrealizedGainLossPctARS,
+        unrealizedGainLossPctUSD,
         transactions: h.transactions,
       });
     }
@@ -111,11 +148,11 @@ export function calculatePortfolioSummary(transactions: Transaction[], holdings:
   const totalInvestedARS = holdings.reduce((sum, h) => sum + h.totalInvestedARS, 0);
   const totalInvestedUSD = holdings.reduce((sum, h) => sum + h.totalInvestedUSD, 0);
 
-  // P&L aggregation — ARS
+  // P&L aggregation — ARS (usa currentTotalValueARS que incluye conversión via CCL)
   const arsHoldingsWithPrice = holdings.filter(
-    h => h.currentPriceCurrency === 'ARS' && h.currentTotalValue !== undefined,
+    h => h.currentTotalValueARS !== undefined && h.totalInvestedARS > 0,
   );
-  const currentTotalValueARS = arsHoldingsWithPrice.reduce((sum, h) => sum + (h.currentTotalValue ?? 0), 0);
+  const currentTotalValueARS = arsHoldingsWithPrice.reduce((sum, h) => sum + (h.currentTotalValueARS ?? 0), 0);
   const investedInPricedAssetsARS = arsHoldingsWithPrice.reduce((sum, h) => sum + h.totalInvestedARS, 0);
   const unrealizedGainLossARS = currentTotalValueARS - investedInPricedAssetsARS;
   const unrealizedGainLossPctARS = investedInPricedAssetsARS > 0
@@ -123,11 +160,11 @@ export function calculatePortfolioSummary(transactions: Transaction[], holdings:
     : 0;
   const assetsWithPrice = holdings.filter(h => h.currentPricePerUnit !== undefined).length;
 
-  // P&L aggregation — USD
+  // P&L aggregation — USD (usa currentTotalValueUSD que incluye conversión via CCL)
   const usdHoldingsWithPrice = holdings.filter(
-    h => h.currentPriceCurrency === 'USD' && h.currentTotalValue !== undefined,
+    h => h.currentTotalValueUSD !== undefined && h.totalInvestedUSD > 0,
   );
-  const currentTotalValueUSD = usdHoldingsWithPrice.reduce((sum, h) => sum + (h.currentTotalValue ?? 0), 0);
+  const currentTotalValueUSD = usdHoldingsWithPrice.reduce((sum, h) => sum + (h.currentTotalValueUSD ?? 0), 0);
   const investedInPricedAssetsUSD = usdHoldingsWithPrice.reduce((sum, h) => sum + h.totalInvestedUSD, 0);
   const unrealizedGainLossUSD = currentTotalValueUSD - investedInPricedAssetsUSD;
   const unrealizedGainLossPctUSD = investedInPricedAssetsUSD > 0

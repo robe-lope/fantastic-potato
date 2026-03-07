@@ -32,6 +32,13 @@ export interface Holding {
   currentTotalValue?: number;
   unrealizedGainLoss?: number;
   unrealizedGainLossPct?: number;
+  // Valores en ambas monedas (disponibles cuando hay precio actual + tipo de cambio CCL)
+  currentTotalValueARS?: number;
+  currentTotalValueUSD?: number;
+  unrealizedGainLossARS?: number;
+  unrealizedGainLossUSD?: number;
+  unrealizedGainLossPctARS?: number;
+  unrealizedGainLossPctUSD?: number;
   transactions: Transaction[];
 }
 

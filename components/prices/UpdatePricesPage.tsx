@@ -24,8 +24,8 @@ interface UpdatePricesPageProps {
 }
 
 export function UpdatePricesPage({ showToast }: UpdatePricesPageProps) {
-  const { transactions, currentPrices, updatePrice, updatePricesBulk } = useData();
-  const { holdings } = usePortfolio(transactions, currentPrices);
+  const { transactions, currentPrices, updatePrice, updatePricesBulk, cclRate, refreshCCLRate } = useData();
+  const { holdings } = usePortfolio(transactions, currentPrices, cclRate ?? undefined);
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -57,7 +57,10 @@ export function UpdatePricesPage({ showToast }: UpdatePricesPageProps) {
     setMarketClosed(false);
 
     try {
-      const response = await fetchCurrentPrices(holdings);
+      const [response] = await Promise.all([
+        fetchCurrentPrices(holdings),
+        refreshCCLRate(),
+      ]);
       const updated = applyFetchedPrices(currentPrices, response.prices, response.fetchedAt);
       await updatePricesBulk(updated);
 
@@ -134,13 +137,20 @@ export function UpdatePricesPage({ showToast }: UpdatePricesPageProps) {
           <div>
             <h3 className="text-white font-semibold text-sm mb-1">Buscar precios automáticamente</h3>
             <p className="text-slate-500 text-xs">
-              Consulta Yahoo Finance en tiempo real vía la API interna.
+              Consulta Yahoo Finance en tiempo real vía la API interna. Los precios en ARS se convierten a USD usando el tipo de cambio CCL.
             </p>
-            {lastFetchAt && !serverError && (
-              <p className="text-slate-600 text-xs mt-1 flex items-center gap-1">
-                <Clock size={10} /> Última búsqueda: {lastFetchAt}
-              </p>
-            )}
+            <div className="flex items-center gap-3 mt-1.5">
+              {cclRate && (
+                <span className="text-xs text-emerald-400 font-mono">
+                  CCL: {formatARS(cclRate)}
+                </span>
+              )}
+              {lastFetchAt && !serverError && (
+                <p className="text-slate-600 text-xs flex items-center gap-1">
+                  <Clock size={10} /> Última búsqueda: {lastFetchAt}
+                </p>
+              )}
+            </div>
           </div>
           <button
             onClick={handleFetchPrices}
@@ -194,14 +204,16 @@ export function UpdatePricesPage({ showToast }: UpdatePricesPageProps) {
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wide">Precio Actual</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wide">Moneda</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wide">Últ. Actualización</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wide">Valor Aprox.</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wide">
+                {cclRate ? 'Precio en USD' : 'Precio (moneda orig.)'}
+              </th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#2d3348]">
             {rows.map((row, i) => {
               const price = parseFloat(row.price.replace(',', '.'));
-              const approxValue = !isNaN(price) && price > 0 ? price * row.quantity : null;
+              const hasPrice = !isNaN(price) && price > 0;
 
               return (
                 <tr
@@ -246,10 +258,18 @@ export function UpdatePricesPage({ showToast }: UpdatePricesPageProps) {
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {row.updatedAt ? formatDate(row.updatedAt) : '—'}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-300">
-                    {approxValue !== null
-                      ? row.currency === 'ARS' ? formatARS(approxValue) : formatUSD(approxValue)
-                      : '—'}
+                  <td className="px-4 py-3 font-mono text-xs">
+                    {hasPrice ? (() => {
+                      if (cclRate && row.currency === 'ARS') {
+                        return (
+                          <div>
+                            <span className="text-emerald-400 font-medium">{formatUSD(price / cclRate)}</span>
+                            <span className="block text-slate-600 text-[10px]">{formatARS(price)}</span>
+                          </div>
+                        );
+                      }
+                      return <span className="text-slate-300">{row.currency === 'ARS' ? formatARS(price) : formatUSD(price)}</span>;
+                    })() : '—'}
                   </td>
                   <td className="px-4 py-3">
                     <button

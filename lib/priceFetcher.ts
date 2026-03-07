@@ -17,15 +17,11 @@ export interface FetchPricesResponse {
 }
 
 export async function fetchCurrentPrices(
-  holdings: Array<{
-    ticker: string;
-    assetType: 'CEDEAR' | 'ACCION_LOCAL';
-    currentPriceCurrency?: 'ARS' | 'USD';
-  }>,
+  holdings: Array<{ ticker: string }>,
 ): Promise<FetchPricesResponse> {
   const tickers = holdings.map(h => ({
     symbol: h.ticker,
-    yahooSymbol: toYahooTicker(h.ticker, h.assetType, h.currentPriceCurrency ?? 'ARS'),
+    yahooSymbol: toYahooTicker(h.ticker),
   }));
 
   const response = await fetch('/api/prices', {
@@ -39,7 +35,8 @@ export async function fetchCurrentPrices(
   }
 
   return response.json() as Promise<FetchPricesResponse>;
-}
+}      
+
 
 export function applyFetchedPrices(
   existing: Record<string, CurrentPrice>,

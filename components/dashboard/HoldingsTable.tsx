@@ -81,11 +81,12 @@ export function HoldingsTable({ holdings, onPriceUpdate }: HoldingsTableProps) {
     ? holdings.reduce((s, h) => s + h.totalInvestedUSD, 0)
     : holdings.reduce((s, h) => s + h.totalInvestedARS, 0);
 
-  const pricedHoldings = holdings.filter(
-    h => h.currentPriceCurrency === currency && h.currentTotalValue !== undefined,
-  );
-  const totalCurrent = pricedHoldings.reduce((s, h) => s + (h.currentTotalValue ?? 0), 0);
-  const totalGain = pricedHoldings.reduce((s, h) => s + (h.unrealizedGainLoss ?? 0), 0);
+  const totalCurrent = isUSD
+    ? holdings.reduce((s, h) => s + (h.currentTotalValueUSD ?? 0), 0)
+    : holdings.reduce((s, h) => s + (h.currentTotalValueARS ?? 0), 0);
+  const totalGain = isUSD
+    ? holdings.reduce((s, h) => s + (h.unrealizedGainLossUSD ?? 0), 0)
+    : holdings.reduce((s, h) => s + (h.unrealizedGainLossARS ?? 0), 0);
 
   const portfolioTotal = isUSD
     ? holdings.reduce((s, h) => s + h.totalInvestedUSD, 0)
@@ -129,11 +130,14 @@ export function HoldingsTable({ holdings, onPriceUpdate }: HoldingsTableProps) {
         <tbody className="divide-y divide-[#2d3348]">
           {sorted.map((h, i) => {
             const isEditing = editingTicker === h.ticker;
-            const hasGain = h.unrealizedGainLoss !== undefined && h.unrealizedGainLoss >= 0;
-            const gainColor = hasGain ? 'text-[#00c853]' : 'text-[#ff1744]';
+            const gainLossVal = isUSD ? h.unrealizedGainLossUSD : h.unrealizedGainLossARS;
+            const gainLossPctVal = isUSD ? h.unrealizedGainLossPctUSD : h.unrealizedGainLossPctARS;
+            const currentValDisplay = isUSD ? h.currentTotalValueUSD : h.currentTotalValueARS;
+            const hasGain = gainLossVal !== undefined && gainLossVal >= 0;
+            const gainColor = gainLossVal === undefined || hasGain ? 'text-[#00c853]' : 'text-[#ff1744]';
 
-            const invested = h.totalInvestedARS;
-            const gainLoss = h.unrealizedGainLoss ?? 0;
+            const invested = isUSD ? h.totalInvestedUSD : h.totalInvestedARS;
+            const gainLoss = gainLossVal ?? 0;
             const total = Math.max(invested + Math.abs(gainLoss), invested, 1);
             const investedPct = (invested / total) * 100;
             const gainPct = Math.abs(gainLoss / total) * 100;
@@ -179,7 +183,7 @@ export function HoldingsTable({ holdings, onPriceUpdate }: HoldingsTableProps) {
                         ? (h.totalInvestedUSD > 0 ? formatUSD(h.totalInvestedUSD) : <span className="text-slate-600">—</span>)
                         : (h.totalInvestedARS > 0 ? formatARS(h.totalInvestedARS) : 'N/A')}
                     </span>
-                    {h.unrealizedGainLoss !== undefined && (
+                    {gainLossVal !== undefined && (
                       <div className="flex h-1 rounded-full overflow-hidden mt-1 w-20 bg-[#0f1117]">
                         <div className="bg-[#2979ff] h-full" style={{ width: `${investedPct}%` }} />
                         <div
@@ -241,11 +245,9 @@ export function HoldingsTable({ holdings, onPriceUpdate }: HoldingsTableProps) {
                 </td>
 
                 <td className="px-3 py-3 font-mono text-xs">
-                  {h.currentTotalValue !== undefined ? (
+                  {currentValDisplay !== undefined ? (
                     <span className="text-slate-200">
-                      {h.currentPriceCurrency === 'ARS'
-                        ? formatARS(h.currentTotalValue)
-                        : formatUSD(h.currentTotalValue)}
+                      {isUSD ? formatUSD(currentValDisplay) : formatARS(currentValDisplay)}
                     </span>
                   ) : (
                     <span className="text-slate-600">—</span>
@@ -253,12 +255,10 @@ export function HoldingsTable({ holdings, onPriceUpdate }: HoldingsTableProps) {
                 </td>
 
                 <td className="px-3 py-3 font-mono text-xs">
-                  {h.unrealizedGainLoss !== undefined ? (
+                  {gainLossVal !== undefined ? (
                     <span className={gainColor}>
-                      {h.unrealizedGainLoss >= 0 ? '+' : ''}
-                      {h.currentPriceCurrency === 'ARS'
-                        ? formatARS(h.unrealizedGainLoss)
-                        : formatUSD(h.unrealizedGainLoss)}
+                      {gainLossVal >= 0 ? '+' : ''}
+                      {isUSD ? formatUSD(gainLossVal) : formatARS(gainLossVal)}
                     </span>
                   ) : (
                     <span className="text-slate-600">—</span>
@@ -266,10 +266,10 @@ export function HoldingsTable({ holdings, onPriceUpdate }: HoldingsTableProps) {
                 </td>
 
                 <td className="px-3 py-3 font-mono text-xs">
-                  {h.unrealizedGainLossPct !== undefined ? (
+                  {gainLossPctVal !== undefined ? (
                     <span className={`font-medium ${gainColor}`}>
-                      {h.unrealizedGainLossPct >= 0 ? '+' : ''}
-                      {formatPercentage(h.unrealizedGainLossPct)}
+                      {gainLossPctVal >= 0 ? '+' : ''}
+                      {formatPercentage(gainLossPctVal)}
                     </span>
                   ) : (
                     <span className="text-slate-600">—</span>

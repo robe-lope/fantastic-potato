@@ -24,7 +24,7 @@ const emptyForm = {
   assetType: 'CEDEAR' as 'CEDEAR' | 'ACCION_LOCAL',
   quantity: '',
   totalAmount: '',
-  currency: 'ARS' as 'ARS' | 'USD',
+  currency: 'USD' as 'ARS' | 'USD',
   exchangeRate: '',
   notes: '',
 };
@@ -62,7 +62,7 @@ export function TransactionForm({ onSubmit, initial, transactions, onCancel }: T
       setIsFetchingPrice(true);
       setFetchedPriceInfo(null);
       try {
-        const yahooSymbol = toYahooTicker(form.ticker.toUpperCase(), form.assetType, form.currency);
+        const yahooSymbol = toYahooTicker(form.ticker.toUpperCase());
         const res = await fetch(`/api/prices/historical?symbol=${yahooSymbol}&date=${form.date}`);
         if (!res.ok) throw new Error('No encontrado');
         const data = await res.json();

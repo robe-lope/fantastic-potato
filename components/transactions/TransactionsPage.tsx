@@ -36,10 +36,14 @@ export function TransactionsPage({
     return matchSearch && matchType && matchAsset;
   });
 
-  const handleBulkImport = (txs: Transaction[]) => {
-    onBulkImport(txs);
-    setShowBulkImport(false);
-    showToast(`${txs.length} operaciones importadas correctamente`);
+  const handleBulkImport = async (txs: Transaction[]) => {
+    try {
+      await onBulkImport(txs);
+      setShowBulkImport(false);
+      showToast(`${txs.length} operaciones importadas correctamente`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Error al importar operaciones', 'error');
+    }
   };
 
   return (

@@ -7,10 +7,11 @@ import { calculateHoldings, calculatePortfolioSummary, getPortfolioPercentage } 
 export function usePortfolio(
   transactions: Transaction[],
   currentPrices: Record<string, CurrentPrice> = {},
+  cclRate?: number,
 ) {
   const holdings = useMemo(
-    () => calculateHoldings(transactions, currentPrices),
-    [transactions, currentPrices],
+    () => calculateHoldings(transactions, currentPrices, cclRate),
+    [transactions, currentPrices, cclRate],
   );
 
   const summary = useMemo(
